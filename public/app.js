@@ -22,6 +22,8 @@ let externalConnected = false;
 let externalFeed = createFeedState();
 let externalSilenceTimer = null;
 let externalBrainPending = false;
+// Reused across re-renders so a playing clip is not interrupted when new events arrive.
+const externalAudio = new Map();
 let selectedVoice = '';
 let voices = [];
 let chatInFlight = false;
@@ -154,13 +156,38 @@ function renderMessages() {
     const date = new Date(item.createdAt); time.textContent = Number.isFinite(date.getTime()) ? date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
     label.append(time);
     const body = document.createElement('p'); body.className = 'message-body'; body.textContent = item.text;
-    message.append(label, body); host.append(message);
+    message.append(label, body);
+    if (externalMode && item.audio) message.append(externalAudioPlayer(item.audio));
+    host.append(message);
   }
   if (session.busy) {
     const pending = document.createElement('article'); pending.className = 'message assistant pending';
     const body = document.createElement('p'); body.className = 'message-body'; body.textContent = '생각하고 있어요 ···'; pending.append(body); host.append(pending);
   }
   if (nearBottom || !initialized || session.busy) host.scrollTop = host.scrollHeight;
+}
+
+// Playback only starts from the user's own click: no autoplay, nothing fetched until then.
+function externalAudioPlayer(audio) {
+  let player = externalAudio.get(audio.url);
+  if (!player) {
+    player = document.createElement('audio');
+    player.className = 'message-audio';
+    player.controls = true;
+    player.preload = 'none';
+    player.src = audio.url;
+    player.setAttribute('aria-label', '보드 음성 듣기');
+    externalAudio.set(audio.url, player);
+    while (externalAudio.size > 60) releaseExternalAudio(externalAudio.keys().next().value);
+  }
+  return player;
+}
+
+function releaseExternalAudio(url) {
+  const player = externalAudio.get(url);
+  if (!player) return;
+  player.pause(); player.removeAttribute('src'); player.load();
+  externalAudio.delete(url);
 }
 
 function renderPlacements() {
@@ -297,6 +324,7 @@ function updateBrainActivity() {
 function disconnectExternalFeed() {
   externalSource?.close(); externalSource = null;
   clearTimeout(externalSilenceTimer);
+  for (const url of [...externalAudio.keys()]) releaseExternalAudio(url);
   externalMode = false; externalConnected = false;
   $('#external-disconnect').disabled = true;
   if (state) render(state);
@@ -307,7 +335,7 @@ function connectExternalFeed(url) {
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('인증정보가 없는 HTTP(S) 스트림 주소를 입력해 주세요.');
   disconnectExternalFeed();
   stopSpeaking(); discardRecognition = true; recognition?.abort();
-  externalMode = true; externalFeed = createFeedState();
+  externalMode = true; externalFeed = createFeedState({ audioBase: parsed.href });
   const source = new EventSource(parsed.href);
   externalSource = source;
   $('#external-disconnect').disabled = false;
@@ -316,7 +344,7 @@ function connectExternalFeed(url) {
   source.onopen = () => {
     if (externalSource !== source) return;
     externalConnected = true;
-    feedback('#external-feedback', '외부 텍스트 연결됨'); render(state);
+    feedback('#external-feedback', '외부 대화 연결됨'); render(state);
   };
   source.onmessage = event => {
     if (externalSource !== source) return;

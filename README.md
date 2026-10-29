@@ -38,11 +38,16 @@ This is a **384-neuron isolated subset with 20,516 real connections**, not the e
 4. 운영자가 실제 로봇을 조종하고 작업 시작·배치 완료·실패·재시도를 기록합니다. “잠깐 기다려” 또는 대기 버튼은 모델 응답을 기다리지 않고 앱을 대기 상태로 바꿉니다. 실제 로봇 정지는 운영자가 수행합니다.
 5. 배치를 모두 마친 뒤 사용자가 승인합니다. 이후 **들어 올리기 → 건네기 → 실제 수령 확인 → 그리퍼 해제 확인** 순서로 진행합니다. 마지막 두 확인 전에는 전달 완료가 아닙니다.
 
+## 고양이 보드 외부 대화 (USB)
+
+로봇팔 위 고양이 보드를 USB로 연결하면 보드의 대화 상태·문장·음성을 **설정 → 외부 대화**에서 볼 수 있습니다. 노트북에서 `python3 bridge/cat_usb_bridge.py`를 실행하고 `http://127.0.0.1:4321/events`에 연결하세요. 보드 로그 중 `CAT_EVT` 줄만 읽고, 음성은 재생 버튼을 누를 때만 들립니다. [설치·규칙 설명](bridge/README.md)
+
 ## Verification
 
 ```powershell
 npm test
 node python/test-brain-worker.mjs
+python3 -m unittest discover -s bridge/tests
 ```
 
 The brain integration has been exercised with real data: 100 Hz input over 200 ms produced 1,260 spikes in 139 active neurons; no input produced zero spikes; silencing all stimulus outputs removed downstream propagation. Identical seeds reproduced the node rates. These are local numerical checks, not robot experiments.

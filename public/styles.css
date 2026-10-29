@@ -57,3 +57,7 @@
 @media(min-width:1500px){.conversation-card{height:710px}.conversation-brain .brain-chart{height:145px}}
 @media(max-width:800px){.conversation-card{height:690px}}
 @media(prefers-reduced-motion:reduce){.conversation-brain *{animation:none!important}}
+
+/* External board audio: shown under its sentence, played only on click. */
+.message-audio{display:block;width:min(100%,260px);height:30px;margin-top:6px}
+.message.user .message-audio{margin-left:auto}
