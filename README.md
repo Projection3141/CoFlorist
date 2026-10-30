@@ -1,5 +1,68 @@
 # CoFlorist
 
+**Track: Physical AI.** CoFlorist is an operator-assisted flower-arranging dashboard. A person talks to it (typed or spoken Korean); a **real, isolated 384-neuron subset of the FlyWire fruit-fly connectome** is stimulated and measured; **NVIDIA Nemotron on Nebius Token Factory** turns the request plus the measured circuit state into a short spoken reply and a flower placement plan; a **human operator** then drives the robot arm and confirms every pick, place and hand-over. No robot command is sent automatically, the circuit generates no words, and nothing here claims that a fly brain understands flowers or emotions.
+
+*English summary first; the full Korean guide follows below. 한국어 안내는 아래에 있습니다.*
+
+## Why we built it
+
+Flower shops are full of small, repeated hand-overs where the hard part is timing, not grasping: wait, offer, or reach. We wanted a physical assistant whose "when to act" signal comes from a measurable biological circuit rather than a hand-tuned timer, and whose language comes from an open-weight NVIDIA model that a small team can run through a pay-per-token API. The fruit-fly sugar-sensing circuit is one of the few complete, public, cell-level circuits where stimulus in and motor neuron out are both known, so it can be driven and read honestly.
+
+## How it works
+
+1. **Input.** The main screen accepts a typed sentence or a microphone recording (up to 60 s). Speech is transcribed locally with faster-whisper (CPU, int8, `base`). The retained `flora/` reference device (a Tuya T5AI cat) is another input path, documented in `docs/EXTERNAL_FEED_CONTRACT.md`.
+2. **Fly circuit (input → output in one sentence).** Explicit app rules map the utterance to a stimulus rate in Hz on the 21 sugar-sensing neurons of a 384-neuron, 20,407-connection FlyWire v630 subset; Brian2 simulates 200 ms; the measured firing (active neurons, downstream rate, MN9 motor-neuron rate) is thresholded by app rules into `wait` / `confirm` / `propose` (shown as WAIT / OFFER / REACH). That decision gates how the model answers and what the operator is advised to do. It is a connectome-derived subset, not a whole brain, and it does not perceive flower colour. Measured sweep: `docs/FLORA_BRAIN_SWEEP.md`.
+3. **Language: NVIDIA Nemotron via Nebius Token Factory.** `server/nebius.js` calls `https://api.tokenfactory.nebius.com/v1/chat/completions` at runtime with the system prompt in `server/system-prompt.txt`. The model receives the user turn, recipient context and the circuit decision, and must return one JSON object: `reply` (2–3 short Korean sentences), `intent` (`gift|arrange|pause|resume|approve|change|chat`) and `placements` (colour / position / quantity). Default model: **`nvidia/nemotron-3-super-120b-a12b`** (`NEBIUS_MODEL`; any `nvidia/*nemotron*` ID on the account is accepted). The `flora/` reference server uses **`nvidia/Nemotron-3_5-Lightning`** on the same endpoint, chosen after a side-by-side test for Korean quality at 0.6–0.9 s per spoken turn (`flora/docs/MEASUREMENTS.md`).
+4. **Output.** The reply is shown and spoken (Windows Korean voice, WAV), the placement plan appears as pending steps, and the operator performs and logs start / placed / failed / retry, then user approval, lift, hand-over, receipt and gripper release. Only after that is a delivery marked complete.
+
+Nemotron is used **as served, with prompt engineering only**: no fine-tuning, no weights in this repository. The fly circuit never generates sentences; the prompt tells the model to treat the circuit result as a pacing signal, not as evidence about the user's feelings.
+
+## Quick start (verified on Windows)
+
+Requirements: Windows, Node.js 24, Python 3.10+ (3.12 recommended), Chrome or Edge, a Windows Korean voice (e.g. Microsoft Heami), internet access for Nebius. A Nebius Token Factory API key is required for model answers: sign in to the Nebius Token Factory console, create an API key, and put it in `.env`; usage is billed per token (see the API reference link below).
+
+```powershell
+npm install
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }   # then set NEBIUS_API_KEY (and NEBIUS_MODEL if you want another Nemotron ID)
+powershell -File scripts/setup-brain.ps1 -PythonExecutable "C:\path\to\python.exe"   # downloads ~90 MB of pinned FlyWire source data once
+npm run setup:voice
+npm start
+```
+
+Open http://localhost:4317 (the server binds to the local PC only). API keys never reach the browser, SQLite or exports.
+
+**Without an API key** you can still verify the parts that do not call a model:
+
+```powershell
+npm test                              # API, pipeline and local-speech tests (no network key needed)
+node python/test-brain-worker.mjs     # real circuit numbers: no-stimulus vs stimulus, same-seed reproducibility, silencing
+```
+
+macOS: `sh scripts/setup-brain-macos.sh` prepares and tests the circuit (Python 3.13 confirmed); the local voice pipeline (Whisper setup script and Korean TTS) is Windows-only at the moment. The `flora/server` reference implementation has 175 tests that run with fake providers and no keys (`cd flora/server && uv run pytest -q`).
+
+## What is real and what is not
+
+- The circuit is a real FlyWire v630 subset with original signed connection weights; removing the rest of the brain changes its dynamics. Neuron and edge counts and firing rates are measured values.
+- Badges and placement plans are **suggestions**. The robot is manually operated; the app records what the operator did. Numerical tests do not imply a successful physical pick.
+- Recipient "history" is app memory, not neural learning. The camera view is display-only; nothing recognises flowers or people.
+- Speech recognition and synthesis are local open-source / OS components, not Nemotron.
+
+## Timeline (submission-period disclosure)
+
+Nothing in this repository predates the hackathon's prior-work cut-off. The CoFlorist repository was created on 2026-10-25. The `flora/` reference server descends from a voice-device server the same team started on 2026-09-29 and switched to Nemotron on Nebius Token Factory on 2026-10-29; the cat firmware was written in October 2026. During the submission period we added the FlyWire circuit worker and sweep, the Nemotron dialogue pipeline, the operator workflow, the external-feed contract and the Flora reference device/server.
+
+## Sources and licenses
+
+- CoFlorist is MIT-licensed ([LICENSE](LICENSE)). The `flora/` reference implementation is MIT under its own `LICENSE`, except TuyaOpen-derived files, which stay Apache-2.0 ([flora/THIRD_PARTY_NOTICES.md](flora/THIRD_PARTY_NOTICES.md), [flora/firmware/LICENSE-APACHE-2.0](flora/firmware/LICENSE-APACHE-2.0)).
+- Third-party code, datasets, model weights and user-provided images retain their own licenses; see `python/README.md` and the dataset manifest.
+- Fly circuit: [Drosophila brain model](https://github.com/philshiu/Drosophila_brain_model/tree/91bdd1e7dcf193f3e7ca5a8933497fcef63b7960) © 2023 Philip Shiu and Nico Spiller, MIT (Shiu et al., *Nature* 2024). Underlying data: FlyWire v630 connectome by the FlyWire Consortium (Dorkenwald et al., *Nature* 2024; Schlegel et al., *Nature* 2024), downloaded at setup time from the pinned repository, with sources, hashes and extraction rule recorded in `data/flywire/manifest.json`; the dataset itself is not redistributed here and remains under FlyWire's terms.
+- Language model: NVIDIA Nemotron (OpenMDW open weights), accessed as a hosted service on [Nebius Token Factory](https://docs.tokenfactory.nebius.com/api-reference/introduction). No weights are included.
+- [Brian2](https://brian2.readthedocs.io/) (simulation), [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (local STT), Windows SpeechSynthesizer (local Korean TTS).
+
+---
+
+## 한국어 안내 (Korean guide)
+
 메인 화면에서 텍스트를 입력하거나 마이크로 말하면, 실제 FlyWire 부분회로를 계산한 뒤 그 결과를 반영한 Nebius 답변을 한국어 음성으로 들려주는 로컬 꽃 작업 대시보드입니다. 화면은 **메인**과 **설정**으로 구성됩니다.
 
 대화 흐름은 다음과 같습니다.
@@ -71,6 +134,8 @@ API 테스트는 별도 로컬 서버에서 환경 변수 키 비노출, 연결 
 - [Nebius Token Factory API](https://docs.tokenfactory.nebius.com/api-reference/introduction): 실제 NVIDIA Nemotron 모델 요청.
 - [Drosophila brain model](https://github.com/philshiu/Drosophila_brain_model/tree/91bdd1e7dcf193f3e7ca5a8933497fcef63b7960): copyright © 2023 Philip Shiu and Nico Spiller, MIT. 원본 라이선스는 `data/flywire/source/LICENSE`에 보존됩니다.
 - [Brian2](https://brian2.readthedocs.io/): 신경 계산.
+- [FlyWire](https://flywire.ai/) v630 connectome: 위 저장소가 고정 커밋으로 내려받는 원본 데이터. FlyWire Consortium(Dorkenwald et al., Nature 2024; Schlegel et al., Nature 2024)에 귀속되며 데이터 이용 조건은 FlyWire의 안내를 따릅니다. 저장소에는 데이터 원본이 들어 있지 않고 `data/flywire/manifest.json`에 출처·해시만 기록됩니다.
+- [NVIDIA Nemotron](https://huggingface.co/nvidia) (OpenMDW 공개 가중치): Nebius Token Factory에서 호스팅 서비스로 호출합니다. 가중치는 저장소에 포함되지 않습니다.
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper): CPU int8 Whisper base 음성 인식.
 - [Windows SpeechSynthesizer](https://learn.microsoft.com/en-us/uwp/api/windows.media.speechsynthesis.speechsynthesizer): 설치된 한국어 목소리로 WAV 합성.
 
